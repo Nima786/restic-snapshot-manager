@@ -1,18 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v4.6 (The ShellCheck-Approved Version)
+# Universal Server Snapshot Script v5.0 (The Production-Ready Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v4.6 Changelog:
-# - Passed shellcheck linting to fix all potential scripting errors and
-#   adhere to shell scripting best practices.
-# - Refactored variable handling to use arrays for package names and Docker
-#   container IDs, preventing word-splitting issues.
-# - Improved exit code checking for better readability and reliability.
-# - Added '-r' flag to all 'read' commands to handle user input safely.
+# v5.0 Changelog:
+# - CRITICAL FEATURE: Added robust disk space checks before backup and restore.
+#   - The script now calculates required space for the first backup.
+#   - It checks for a minimum free space buffer for subsequent backups.
+#   - It verifies that /tmp has enough space to perform a restore.
+#   - This prevents the script from starting an operation that is likely to fail.
 # ==============================================================================
 
 # --- Configuration ---
@@ -20,6 +19,8 @@ BACKUP_DIR="/var/backups/restic-repo"
 PASSWORD_FILE="/etc/restic/password"
 RESTIC_EXCLUDE_FILE="/etc/restic/exclude.conf"
 RSYNC_EXCLUDE_FILE="/etc/restic/rsync-exclude.conf"
+# A safe minimum space in GB for subsequent backups
+MIN_FREE_SPACE_GB=5
 # --- End Configuration ---
 
 
@@ -35,7 +36,7 @@ press_enter_to_continue() { echo ""; read -r -p "Press [Enter] to continue..."; 
 # --- Core Logic Functions ---
 
 check_and_install_dependencies() {
-    local -a missing_packages=() # Use an array
+    local -a missing_packages=()
     if ! command -v restic &> /dev/null; then missing_packages+=("restic"); fi
     if ! command -v rsync &> /dev/null; then missing_packages+=("rsync"); fi
     if ! command -v jq &> /dev/null; then missing_packages+=("jq"); fi
@@ -99,9 +100,56 @@ initialize_repo() {
     echo -e "\nInitialization complete!"
 }
 
+# NEW FUNCTION: Check for adequate disk space before operations
+check_disk_space_for_backup() {
+    echo "Checking for available disk space..."
+    local available_kb
+    available_kb=$(df -k --output=avail "$BACKUP_DIR" | tail -n 1)
+
+    # Check if this is the first backup
+    local total_snapshots
+    total_snapshots=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" snapshots --json | jq 'length')
+
+    if [ "$total_snapshots" -eq 0 ]; then
+        echo "This is the first backup. Calculating required space..."
+        local used_kb
+        used_kb=$(df -k --output=used / /boot | tail -n +2 | awk '{s+=$1} END {print s}')
+        # Add a 10% safety buffer
+        local required_kb=$((used_kb * 11 / 10))
+
+        if [ "$available_kb" -lt "$required_kb" ]; then
+            local required_gb=$((required_kb / 1024 / 1024))
+            local available_gb=$((available_kb / 1024 / 1024))
+            echo "============================ ERROR ============================"
+            echo "Not enough disk space for the first backup."
+            echo "Required: ~${required_gb} GB | Available: ${available_gb} GB"
+            echo "==============================================================="
+            return 1
+        fi
+    else
+        echo "Checking for minimum free space for subsequent backup..."
+        local min_free_kb=$((MIN_FREE_SPACE_GB * 1024 * 1024))
+        if [ "$available_kb" -lt "$min_free_kb" ]; then
+            local available_gb=$((available_kb / 1024 / 1024))
+            echo "============================ ERROR ============================"
+            echo "Not enough free disk space for a new backup."
+            echo "Required: at least ${MIN_FREE_SPACE_GB} GB | Available: ${available_gb} GB"
+            echo "==============================================================="
+            return 1
+        fi
+    fi
+    echo "Disk space check passed."
+    return 0
+}
+
 create_backup() {
     clear_screen
     echo "--- Create a New Server Snapshot ---"
+
+    if ! check_disk_space_for_backup; then
+        return 1
+    fi
+
     local -a running_containers=()
     if command -v docker &> /dev/null && docker info >/dev/null 2>&1; then
         echo "Docker detected. Stopping containers..."
@@ -176,6 +224,30 @@ delete_backup() {
     fi
 }
 
+# NEW FUNCTION: Check for space before restore
+check_disk_space_for_restore() {
+    local snapshot_id=$1
+    echo "Checking for available disk space for restore..."
+    
+    local available_kb
+    available_kb=$(df -k --output=avail /tmp | tail -n 1)
+    
+    local required_kb
+    required_kb=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" stats "$snapshot_id" --json | jq '.[0].total_size')
+
+    if [ "$available_kb" -lt "$required_kb" ]; then
+        local required_gb=$((required_kb / 1024 / 1024))
+        local available_gb=$((available_kb / 1024 / 1024))
+        echo "============================ ERROR ============================"
+        echo "Not enough disk space in /tmp to perform the restore."
+        echo "Required: ~${required_gb} GB | Available: ${available_gb} GB"
+        echo "==============================================================="
+        return 1
+    fi
+    echo "Disk space check passed."
+    return 0
+}
+
 restore_backup() {
     if ! populate_and_display_snapshots; then return; fi
 
@@ -188,6 +260,10 @@ restore_backup() {
     fi
 
     local selected_id=${SNAPSHOT_IDS[$((choice-1))]}
+
+    if ! check_disk_space_for_restore "$selected_id"; then
+        return 1
+    fi
 
     clear_screen
     echo "============================ WARNING ============================"
@@ -248,8 +324,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v4.6"
-    echo "    (The ShellCheck-Approved Version)"
+    echo "  Universal Server Snapshot Manager v5.0"
+    echo "       (The Production-Ready Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
