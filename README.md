@@ -10,7 +10,7 @@ This tool provides a simple, interactive interface for performing full system ba
 
 For a one-line installation and execution, run the following command:
 
-    bash <(curl -fsSL https://raw.githubusercontent.com/Nima786/restic-snapshot-manager/main/quick-install.sh)
+    bash <(curl -fsSL https://raw.githubusercontent.com/Nima786/restic-snapshot-manager/main/snapshot-manager.sh)
 
 ### ✨ Features
 
