@@ -1,15 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v4.5 (The Definitive Version)
+# Universal Server Snapshot Script v4.6 (The ShellCheck-Approved Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v4.5 Changelog:
-# - FINAL BUGFIX: Corrected the display logic to remove the redundant,
-#   confusing second number from the snapshot list. The list is now
-#   cleanly numbered from 1.
+# v4.6 Changelog:
+# - Passed shellcheck linting to fix all potential scripting errors and
+#   adhere to shell scripting best practices.
+# - Refactored variable handling to use arrays for package names and Docker
+#   container IDs, preventing word-splitting issues.
+# - Improved exit code checking for better readability and reliability.
+# - Added '-r' flag to all 'read' commands to handle user input safely.
 # ==============================================================================
 
 # --- Configuration ---
@@ -26,23 +29,23 @@ SNAPSHOT_IDS=()
 
 # --- Helper Functions ---
 clear_screen() { clear; }
-press_enter_to_continue() { echo ""; read -p "Press [Enter] to continue..."; }
+press_enter_to_continue() { echo ""; read -r -p "Press [Enter] to continue..."; }
 
 
 # --- Core Logic Functions ---
 
 check_and_install_dependencies() {
-    local missing_packages=""
-    if ! command -v restic &> /dev/null; then missing_packages+="restic "; fi
-    if ! command -v rsync &> /dev/null; then missing_packages+="rsync "; fi
-    if ! command -v jq &> /dev/null; then missing_packages+="jq "; fi
+    local -a missing_packages=() # Use an array
+    if ! command -v restic &> /dev/null; then missing_packages+=("restic"); fi
+    if ! command -v rsync &> /dev/null; then missing_packages+=("rsync"); fi
+    if ! command -v jq &> /dev/null; then missing_packages+=("jq"); fi
 
-    if [ -n "$missing_packages" ]; then
-        echo "The following required packages are not installed: $missing_packages"
-        read -p "Do you want to install them now? (Y/n): " choice
+    if [ ${#missing_packages[@]} -gt 0 ]; then
+        echo "The following required packages are not installed: ${missing_packages[*]}"
+        read -r -p "Do you want to install them now? (Y/n): " choice
         choice=${choice:-Y}
         if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
-            apt-get update && apt-get install -y $missing_packages
+            apt-get update && apt-get install -y "${missing_packages[@]}"
         else
             echo "Installation aborted."; exit 1
         fi
@@ -99,11 +102,13 @@ initialize_repo() {
 create_backup() {
     clear_screen
     echo "--- Create a New Server Snapshot ---"
-    local running_containers=""
+    local -a running_containers=()
     if command -v docker &> /dev/null && docker info >/dev/null 2>&1; then
         echo "Docker detected. Stopping containers..."
-        running_containers=$(docker ps -q)
-        if [ -n "$running_containers" ]; then docker stop $running_containers; fi
+        mapfile -t running_containers < <(docker ps -q)
+        if [ ${#running_containers[@]} -gt 0 ]; then
+            docker stop "${running_containers[@]}"
+        fi
     fi
 
     echo "Starting backup of / and /boot..."
@@ -114,9 +119,9 @@ create_backup() {
 
     echo "Snapshot created successfully."
 
-    if [ -n "$running_containers" ]; then
+    if [ ${#running_containers[@]} -gt 0 ]; then
         echo "Restarting containers..."
-        docker start $running_containers
+        docker start "${running_containers[@]}"
     fi
 }
 
@@ -136,7 +141,6 @@ populate_and_display_snapshots() {
 
     echo " #  ID         Timestamp           Host    Tags               Paths"
     echo "--- ---------- ------------------- ------- ------------------ -----------------"
-    # Corrected command to only use awk for numbering
     echo "$snapshot_json" | jq -r '.[] | "\(.short_id) \(.time | split(".")[0] | gsub("T";" ")) \(.hostname) \(.tags | join(",")) \(.paths | join(" "))"' | \
     sed 's/manual-snapshot/manual-snapshot /' | \
     awk '{printf "%-3s %s\n", NR, $0}'
@@ -152,7 +156,7 @@ list_backups() {
 delete_backup() {
     if ! populate_and_display_snapshots; then return; fi
     
-    read -p "Enter the NUMBER of the snapshot to delete (or press Enter to cancel): " choice
+    read -r -p "Enter the NUMBER of the snapshot to delete (or press Enter to cancel): " choice
     if [[ -z "$choice" ]]; then echo "Deletion cancelled."; return; fi
 
     if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#SNAPSHOT_IDS[@]} ]; then
@@ -162,7 +166,7 @@ delete_backup() {
 
     local selected_id=${SNAPSHOT_IDS[$((choice-1))]}
     
-    read -p "WARNING: Permanently delete snapshot '$selected_id'? (Y/n): " confirmation
+    read -r -p "WARNING: Permanently delete snapshot '$selected_id'? (Y/n): " confirmation
     confirmation=${confirmation:-Y}
     if [[ "$confirmation" == "y" || "$confirmation" == "Y" ]]; then
         restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" forget "$selected_id" --prune
@@ -175,7 +179,7 @@ delete_backup() {
 restore_backup() {
     if ! populate_and_display_snapshots; then return; fi
 
-    read -p "Enter the NUMBER of the snapshot to RESTORE (or press Enter to cancel): " choice
+    read -r -p "Enter the NUMBER of the snapshot to RESTORE (or press Enter to cancel): " choice
     if [[ -z "$choice" ]]; then echo "Restore cancelled."; return; fi
 
     if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#SNAPSHOT_IDS[@]} ]; then
@@ -190,25 +194,26 @@ restore_backup() {
     echo "You are about to restore the ENTIRE server to snapshot: $selected_id"
     echo "This action is IRREVERSIBLE."
     echo "================================================================="
-    read -p "To confirm, please type 'PROCEED': " confirmation
+    read -r -p "To confirm, please type 'PROCEED': " confirmation
     if [ "$confirmation" != "PROCEED" ]; then echo "Restore aborted."; return; fi
 
-    local running_containers=""
+    local -a running_containers=()
     if command -v docker &> /dev/null && docker info >/dev/null 2>&1; then
         echo "Docker detected. Stopping containers..."
-        running_containers=$(docker ps -q)
-        if [ -n "$running_containers" ]; then docker stop $running_containers; fi
+        mapfile -t running_containers < <(docker ps -q)
+        if [ ${#running_containers[@]} -gt 0 ]; then
+            docker stop "${running_containers[@]}"
+        fi
     fi
 
     RESTORE_TEMP_DIR="/tmp/restic_restore_$(date +%s)"
     mkdir -p "$RESTORE_TEMP_DIR"
 
     echo "Step 1: Restoring snapshot to '$RESTORE_TEMP_DIR'..."
-    restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" restore "$selected_id" --target "$RESTORE_TEMP_DIR"
-    if [ $? -ne 0 ]; then
+    if ! restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" restore "$selected_id" --target "$RESTORE_TEMP_DIR"; then
         echo "Error: Restic restore failed. Aborting."
         rm -rf "$RESTORE_TEMP_DIR"
-        if [ -n "$running_containers" ]; then docker start $running_containers; fi
+        if [ ${#running_containers[@]} -gt 0 ]; then docker start "${running_containers[@]}"; fi
         return
     fi
 
@@ -229,9 +234,9 @@ restore_backup() {
     echo "Step 4: Cleaning up temporary files..."
     rm -rf "$RESTORE_TEMP_DIR"
 
-    if [ -n "$running_containers" ]; then
+    if [ ${#running_containers[@]} -gt 0 ]; then
         echo "Step 5: Restarting containers..."
-        docker start $running_containers
+        docker start "${running_containers[@]}"
         echo "Containers restarted."
     fi
 
@@ -243,8 +248,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v4.5"
-    echo "        (The Definitive Version)"
+    echo "  Universal Server Snapshot Manager v4.6"
+    echo "    (The ShellCheck-Approved Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
@@ -261,7 +266,7 @@ check_and_install_dependencies
 
 if [ ! -d "$BACKUP_DIR/keys" ]; then
     echo "Backup repository not found. You must initialize it first."
-    read -p "Initialize now? (Y/n): " choice
+    read -r -p "Initialize now? (Y/n): " choice
     choice=${choice:-Y}
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
         initialize_repo
@@ -273,7 +278,7 @@ fi
 
 while true; do
     show_menu
-    read -p "Enter your choice [1-4, 0]: " choice
+    read -r -p "Enter your choice [1-4, 0]: " choice
     case $choice in
         1) create_backup; press_enter_to_continue ;;
         2) list_backups; press_enter_to_continue ;;
