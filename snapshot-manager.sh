@@ -1,17 +1,16 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v6.1 (The Definitive, Self-Cleaning Version)
+# Universal Server Snapshot Script v6.3 (The Definitive, Transparent Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v6.1 Changelog:
-# - SELF-CLEANING RESTORE: The script now uses a 'trap' to ensure that if the
-#   restore process is cancelled (Ctrl+C), the large temporary directory
-#   is automatically and immediately deleted.
-# - ACCURATE RESTORE CHECK: Re-instated the universally compatible and 100%
-#   accurate restore space check that works on all Restic versions.
+# v6.3 Changelog:
+# - TRANSPARENCY: The disk space checks for both backup and restore now
+#   always display the "Required" vs "Available" space to the user.
+# - TRANSPARENCY: The script now explicitly frames the backup summary that
+#   Restic provides, so the user can easily see how much data was added.
 # ==============================================================================
 
 # --- Configuration ---
@@ -70,8 +69,10 @@ initialize_repo() {
         echo "$BACKUP_DIR"
         echo "$RESTORE_TEMP_DIR_BASE"
         echo "/var/cache"
-        echo "/home/*/.cache"
+        echo "/var/tmp"
         echo "/tmp"
+        echo "/home/*/.cache"
+        echo "/var/log"
         echo "/proc"
         echo "/sys"
         echo "/dev"
@@ -79,6 +80,7 @@ initialize_repo() {
         echo "/mnt"
         echo "/media"
         echo "/snap"
+        echo "/swap.img"
     } > "$RESTIC_EXCLUDE_FILE"
 
     # Rsync exclude file (for RESTORE)
@@ -89,6 +91,8 @@ initialize_repo() {
         echo "$RESTORE_TEMP_DIR_BASE"
         echo "/var/lib/docker"
         echo "/var/cache"
+        echo "/var/tmp"
+        echo "/var/log"
         echo "/proc"
         echo "/sys"
         echo "/dev"
@@ -98,6 +102,7 @@ initialize_repo() {
         echo "/media"
         echo "/boot/efi"
         echo "/snap"
+        echo "/swap.img"
     } > "$RSYNC_EXCLUDE_FILE"
 
     echo "Creating Restic repository at $BACKUP_DIR..."
@@ -105,10 +110,12 @@ initialize_repo() {
     echo -e "\nInitialization complete!"
 }
 
+# UPDATED FUNCTION to be more transparent
 check_disk_space_for_backup() {
     echo "Checking for available disk space..."
     local available_kb
     available_kb=$(df -k --output=avail "$BACKUP_DIR" | tail -n 1)
+    local available_gb=$((available_kb / 1024 / 1024))
 
     local total_snapshots
     total_snapshots=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" snapshots --json | jq 'length')
@@ -116,26 +123,27 @@ check_disk_space_for_backup() {
     if [ "$total_snapshots" -eq 0 ]; then
         echo "This is the first backup. Calculating required space..."
         local used_kb
-        used_kb=$(du -skx / /boot | awk '{s+=$1} END {print s}')
+        used_kb=$(du -skx --exclude-from="$RESTIC_EXCLUDE_FILE" / /boot | awk '{s+=$1} END {print s}')
         local required_kb=$((used_kb * 110 / 100)) # 10% buffer
+        local required_gb=$((required_kb / 1024 / 1024))
+
+        echo "-> Required: ~${required_gb} GB | Available: ${available_gb} GB"
 
         if [ "$available_kb" -lt "$required_kb" ]; then
-            local required_gb=$((required_kb / 1024 / 1024))
-            local available_gb=$((available_kb / 1024 / 1024))
             echo "============================ ERROR ============================"
             echo "Not enough disk space for the first backup."
-            echo "Required: ~${required_gb} GB | Available: ${available_gb} GB"
             echo "==============================================================="
             return 1
         fi
     else
         echo "Checking for minimum free space for subsequent backup..."
         local min_free_kb=$((MIN_FREE_SPACE_GB * 1024 * 1024))
+        
+        echo "-> Required: ~${MIN_FREE_SPACE_GB} GB | Available: ${available_gb} GB"
+
         if [ "$available_kb" -lt "$min_free_kb" ]; then
-            local available_gb=$((available_kb / 1024 / 1024))
             echo "============================ ERROR ============================"
             echo "Not enough free disk space for a new backup."
-            echo "Required: at least ${MIN_FREE_SPACE_GB} GB | Available: ${available_gb} GB"
             echo "==============================================================="
             return 1
         fi
@@ -162,11 +170,13 @@ create_backup() {
     fi
 
     echo "Starting backup of / and /boot..."
+    echo "Restic will provide a summary when complete..."
+    echo "--------------------------------------------------------------------------------"
     restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" backup \
         --tag "manual-snapshot" \
         --exclude-file="$RESTIC_EXCLUDE_FILE" \
         / /boot
-
+    echo "--------------------------------------------------------------------------------"
     echo "Snapshot created successfully."
 
     if [ ${#running_containers[@]} -gt 0 ]; then
@@ -226,25 +236,27 @@ delete_backup() {
     fi
 }
 
+# UPDATED FUNCTION to be more transparent
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
     
     local available_kb
     available_kb=$(df -k --output=avail / | tail -n 1)
+    local available_gb=$((available_kb / 1024 / 1024))
     
     echo "Calculating true snapshot size (this may take a moment)..."
     local required_bytes
     required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" ls -l "$snapshot_id" | awk '!/^Total:/ {s+=$5} END {print s}')
 
     local required_kb=$((required_bytes * 105 / 100 / 1024))
+    local required_gb=$((required_kb / 1024 / 1024))
+
+    echo "-> Required: ~${required_gb} GB | Available: ${available_gb} GB"
 
     if [ "$available_kb" -lt "$required_kb" ]; then
-        local required_gb=$((required_kb / 1024 / 1024))
-        local available_gb=$((available_kb / 1024 / 1024))
         echo "============================ ERROR ============================"
         echo "Not enough disk space on the main partition to perform the restore."
-        echo "Required: ~${required_gb} GB | Available: ${available_gb} GB"
         echo "==============================================================="
         return 1
     fi
@@ -289,8 +301,6 @@ restore_backup() {
     local RESTORE_TEMP_DIR
     RESTORE_TEMP_DIR="${RESTORE_TEMP_DIR_BASE}_$(date +%s)"
     
-    # --- SELF-CLEANING TRAP ---
-    # This ensures the temp directory is removed even if the script is cancelled.
     trap 'echo -e "\n\nInterruption detected. Cleaning up temporary directory..."; rm -rf "$RESTORE_TEMP_DIR"; exit 1' INT TERM
 
     mkdir -p "$RESTORE_TEMP_DIR"
@@ -298,10 +308,9 @@ restore_backup() {
     echo "Step 1: Restoring snapshot to '$RESTORE_TEMP_DIR'..."
     if ! restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" restore "$selected_id" --target "$RESTORE_TEMP_DIR"; then
         echo "Error: Restic restore failed. Aborting."
-        # The trap will handle cleanup, but we can do it here too for clarity.
         rm -rf "$RESTORE_TEMP_DIR"
         if [ ${#running_containers[@]} -gt 0 ]; then docker start "${running_containers[@]}"; fi
-        trap - INT TERM # Clear the trap
+        trap - INT TERM
         return
     fi
 
@@ -322,7 +331,6 @@ restore_backup() {
     echo "Step 4: Cleaning up temporary files..."
     rm -rf "$RESTORE_TEMP_DIR"
 
-    # --- Clear the trap on successful completion ---
     trap - INT TERM
 
     if [ ${#running_containers[@]} -gt 0 ]; then
@@ -339,8 +347,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v6.1"
-    echo "    (The Definitive, Self-Cleaning Version)"
+    echo "  Universal Server Snapshot Manager v6.3"
+    echo "    (The Definitive, Transparent Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
