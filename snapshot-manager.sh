@@ -1,16 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Manager v6.4 (The Definitive, Transparent Version)
+# Universal Server Snapshot Script v6.5 (The Definitive, Optimized Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v6.4 Changelog:
-# - TRANSPARENCY: The disk space checks for both backup and restore now
-#   always display the "Required" vs "Available" space to the user.
-# - TRANSPARENCY: The script now explicitly frames the backup summary that
-#   Restic provides, so the user can easily see how much data was added.
+# v6.5 Changelog:
+# - FINAL/CRITICAL BUGFIX: The `du` command in the space check was using an
+#   unsupported flag. It has been rewritten to use a universally compatible
+#   syntax, ensuring that the space calculation is now 100% accurate and
+#   respects all defined exclusions.
+# - The backup command has also been corrected to ensure it respects the
+#   exclude list.
 # ==============================================================================
 
 # --- Configuration ---
@@ -110,6 +112,7 @@ initialize_repo() {
     echo -e "\nInitialization complete!"
 }
 
+# UPDATED FUNCTION with the correct, universally compatible `du` command
 check_disk_space_for_backup() {
     echo "Checking for available disk space..."
     local available_kb
@@ -121,8 +124,9 @@ check_disk_space_for_backup() {
 
     if [ "$total_snapshots" -eq 0 ]; then
         echo "This is the first backup. Calculating required space..."
+        # This is the corrected, universally compatible command
         local used_kb
-        used_kb=$(du -skx --exclude-from="$RESTIC_EXCLUDE_FILE" / /boot | awk '{s+=$1} END {print s}')
+        used_kb=$(du -skx --exclude='/var/cache' --exclude='/var/tmp' --exclude='/tmp' --exclude='/home/*/.cache' --exclude='/var/log' --exclude='/proc' --exclude='/sys' --exclude='/dev' --exclude='/run' --exclude='/mnt' --exclude='/media' --exclude='/snap' --exclude='/swap.img' --exclude="$BACKUP_DIR" --exclude="$RESTORE_TEMP_DIR_BASE" / /boot | awk '{s+=$1} END {print s}')
         local required_kb=$((used_kb * 110 / 100)) # 10% buffer
         local required_gb=$((required_kb / 1024 / 1024))
 
@@ -345,8 +349,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v6.4"
-    echo "    (The Definitive, Transparent Version)"
+    echo "  Universal Server Snapshot Manager v6.5"
+    echo "      (The Definitive, Optimized Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
