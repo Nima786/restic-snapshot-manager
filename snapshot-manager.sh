@@ -1,17 +1,15 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v5.8 (The Definitive, Compatible Version)
+# Universal Server Snapshot Script v5.9 (The Definitive, Lint-Free Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v5.8 Changelog:
-# - FINAL/CRITICAL FIX: Replaced the restore space check with a truly universal
-#   method. It now manually calculates the total snapshot size by summing the
-#   size of every individual file, a method that is guaranteed to work on
-#   ALL versions of Restic, old and new. This definitively fixes the space
-#   check for maximum compatibility.
+# v5.9 Changelog:
+# - Passed final shellcheck linting by separating variable declaration and
+#   assignment to prevent masking return values (SC2155). This makes the
+#   script adhere to the highest shell scripting standards.
 # ==============================================================================
 
 # --- Configuration ---
@@ -226,7 +224,6 @@ delete_backup() {
     fi
 }
 
-# UPDATED FUNCTION with the truly universal restore size calculation
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
@@ -235,11 +232,9 @@ check_disk_space_for_restore() {
     available_kb=$(df -k --output=avail / | tail -n 1)
     
     echo "Calculating true snapshot size (this may take a moment)..."
-    # This command is guaranteed to work on all Restic versions.
     local required_bytes
     required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" ls -l "$snapshot_id" | awk '!/^Total:/ {s+=$5} END {print s}')
 
-    # Add a 5% safety buffer
     local required_kb=$((required_bytes * 105 / 100 / 1024))
 
     if [ "$available_kb" -lt "$required_kb" ]; then
@@ -289,7 +284,9 @@ restore_backup() {
         fi
     fi
 
-    local RESTORE_TEMP_DIR="${RESTORE_TEMP_DIR_BASE}_$(date +%s)"
+    # THIS IS THE CORRECTED BLOCK
+    local RESTORE_TEMP_DIR
+    RESTORE_TEMP_DIR="${RESTORE_TEMP_DIR_BASE}_$(date +%s)"
     mkdir -p "$RESTORE_TEMP_DIR"
 
     echo "Step 1: Restoring snapshot to '$RESTORE_TEMP_DIR'..."
@@ -331,8 +328,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v5.8"
-    echo "       (The Definitive, Compatible Version)"
+    echo "  Universal Server Snapshot Manager v5.9"
+    echo "   (The Definitive, Lint-Free Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
