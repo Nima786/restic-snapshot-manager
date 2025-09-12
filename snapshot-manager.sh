@@ -1,15 +1,14 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v5.3 (The Definitive Version)
+# Universal Server Snapshot Script v5.4 (The Definitive, Lint-Free Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v5.3 Changelog:
-# - FINAL/CRITICAL BUGFIX: The disk space check for the RESTORE operation is
-#   now 100% accurate. It calculates the full, uncompressed size of the
-#   snapshot, preventing "no space left on device" errors during restore.
+# v5.4 Changelog:
+# - Passed shellcheck linting by correcting the order of operations in the
+#   restore space check to maintain arithmetic precision (SC2017).
 # ==============================================================================
 
 # --- Configuration ---
@@ -220,7 +219,6 @@ delete_backup() {
     fi
 }
 
-# UPDATED FUNCTION with accurate restore size calculation
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
@@ -228,12 +226,11 @@ check_disk_space_for_restore() {
     local available_kb
     available_kb=$(df -k --output=avail /tmp | tail -n 1)
     
-    # This command gets the TRUE uncompressed size of the snapshot
     local required_bytes
     required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" ls -l "$snapshot_id" | awk 'END {print $3}')
 
-    # Add a 5% safety buffer
-    local required_kb=$((required_bytes / 1024 * 105 / 100))
+    # THIS IS THE CORRECTED LINE - multiplication is done first
+    local required_kb=$((required_bytes * 105 / 100 / 1024))
 
     if [ "$available_kb" -lt "$required_kb" ]; then
         local required_gb=$((required_kb / 1024 / 1024))
@@ -324,8 +321,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v5.3"
-    echo "        (The Definitive Version)"
+    echo "  Universal Server Snapshot Manager v5.4"
+    echo "     (The Definitive, Lint-Free Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
