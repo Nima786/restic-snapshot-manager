@@ -1,17 +1,16 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v5.0 (The Production-Ready Version)
+# Universal Server Snapshot Script v5.1 (Smarter Space Check)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v5.0 Changelog:
-# - CRITICAL FEATURE: Added robust disk space checks before backup and restore.
-#   - The script now calculates required space for the first backup.
-#   - It checks for a minimum free space buffer for subsequent backups.
-#   - It verifies that /tmp has enough space to perform a restore.
-#   - This prevents the script from starting an operation that is likely to fail.
+# v5.1 Changelog:
+# - BUGFIX: The disk space check is now much smarter. It ignores virtual
+#   filesystems like Docker overlays and Snap mounts, preventing it from
+#   incorrectly double-counting used space. It will now report the
+#   correct required space on all systems.
 # ==============================================================================
 
 # --- Configuration ---
@@ -19,7 +18,6 @@ BACKUP_DIR="/var/backups/restic-repo"
 PASSWORD_FILE="/etc/restic/password"
 RESTIC_EXCLUDE_FILE="/etc/restic/exclude.conf"
 RSYNC_EXCLUDE_FILE="/etc/restic/rsync-exclude.conf"
-# A safe minimum space in GB for subsequent backups
 MIN_FREE_SPACE_GB=5
 # --- End Configuration ---
 
@@ -76,6 +74,7 @@ initialize_repo() {
         echo "/run"
         echo "/mnt"
         echo "/media"
+        echo "/snap" # Exclude the snap mount directory itself
     } > "$RESTIC_EXCLUDE_FILE"
 
     # Rsync exclude file (for RESTORE)
@@ -93,6 +92,7 @@ initialize_repo() {
         echo "/mnt"
         echo "/media"
         echo "/boot/efi"
+        echo "/snap"
     } > "$RSYNC_EXCLUDE_FILE"
 
     echo "Creating Restic repository at $BACKUP_DIR..."
@@ -100,22 +100,21 @@ initialize_repo() {
     echo -e "\nInitialization complete!"
 }
 
-# NEW FUNCTION: Check for adequate disk space before operations
+# UPDATED FUNCTION with smarter disk space calculation
 check_disk_space_for_backup() {
     echo "Checking for available disk space..."
     local available_kb
     available_kb=$(df -k --output=avail "$BACKUP_DIR" | tail -n 1)
 
-    # Check if this is the first backup
     local total_snapshots
     total_snapshots=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" snapshots --json | jq 'length')
 
     if [ "$total_snapshots" -eq 0 ]; then
         echo "This is the first backup. Calculating required space..."
+        # This command now excludes virtual filesystems for an accurate calculation
         local used_kb
-        used_kb=$(df -k --output=used / /boot | tail -n +2 | awk '{s+=$1} END {print s}')
-        # Add a 10% safety buffer
-        local required_kb=$((used_kb * 11 / 10))
+        used_kb=$(df -k --output=used -x squashfs -x tmpfs -x devtmpfs -x overlay / /boot | tail -n +2 | awk '{s+=$1} END {print s}')
+        local required_kb=$((used_kb * 11 / 10)) # Add 10% safety buffer
 
         if [ "$available_kb" -lt "$required_kb" ]; then
             local required_gb=$((required_kb / 1024 / 1024))
@@ -224,7 +223,6 @@ delete_backup() {
     fi
 }
 
-# NEW FUNCTION: Check for space before restore
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
@@ -232,11 +230,11 @@ check_disk_space_for_restore() {
     local available_kb
     available_kb=$(df -k --output=avail /tmp | tail -n 1)
     
-    local required_kb
-    required_kb=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" stats "$snapshot_id" --json | jq '.[0].total_size')
+    local required_bytes
+    required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" stats "$snapshot_id" --json --mode blobs | jq '.[0].total_size')
 
-    if [ "$available_kb" -lt "$required_kb" ]; then
-        local required_gb=$((required_kb / 1024 / 1024))
+    if [ "$available_kb" -lt $((required_bytes / 1024)) ]; then
+        local required_gb=$((required_bytes / 1024 / 1024 / 1024))
         local available_gb=$((available_kb / 1024 / 1024))
         echo "============================ ERROR ============================"
         echo "Not enough disk space in /tmp to perform the restore."
@@ -324,8 +322,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v5.0"
-    echo "       (The Production-Ready Version)"
+    echo "  Universal Server Snapshot Manager v5.1"
+    echo "     (Smarter Space Check Edition)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
@@ -340,8 +338,8 @@ if [ "$EUID" -ne 0 ]; then echo "This script must be run as root."; exit 1; fi
 
 check_and_install_dependencies
 
-if [ ! -d "$BACKUP_DIR/keys" ]; then
-    echo "Backup repository not found. You must initialize it first."
+if ! restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" cat config >/dev/null 2>&1; then
+    echo "Backup repository not found or not accessible. You must initialize it first."
     read -r -p "Initialize now? (Y/n): " choice
     choice=${choice:-Y}
     if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
