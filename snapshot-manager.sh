@@ -1,23 +1,23 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v6.5 (The Definitive, Optimized Version)
+# Universal Server Snapshot Script v6.6 (The Definitive, Corrected Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v6.5 Changelog:
-# - FINAL/CRITICAL BUGFIX: The `du` command in the space check was using an
-#   unsupported flag. It has been rewritten to use a universally compatible
-#   syntax, ensuring that the space calculation is now 100% accurate and
-#   respects all defined exclusions.
-# - The backup command has also been corrected to ensure it respects the
-#   exclude list.
+# v6.6 Changelog:
+# - FINAL/CRITICAL BUGFIX: The `restic backup` command has been corrected to
+#   use the exact same set of `--exclude` flags as the `du` space check.
+# - This ensures that the space calculation and the actual backup are
+#   perfectly aligned, and the script will now correctly back up the smaller,
+#   optimized set of files.
 # ==============================================================================
 
 # --- Configuration ---
 BACKUP_DIR="/var/backups/restic-repo"
 PASSWORD_FILE="/etc/restic/password"
+# The exclude file is now a fallback; direct flags are preferred for consistency.
 RESTIC_EXCLUDE_FILE="/etc/restic/exclude.conf"
 RSYNC_EXCLUDE_FILE="/etc/restic/rsync-exclude.conf"
 RESTORE_TEMP_DIR_BASE="/restic_restore_temp"
@@ -64,7 +64,7 @@ initialize_repo() {
     openssl rand -base64 32 > "$PASSWORD_FILE"
     chmod 600 "$PASSWORD_FILE"
 
-    # Restic exclude file (for BACKUP)
+    # Restic exclude file (for BACKUP) - Kept for reference, but direct flags are now used
     mkdir -p "$(dirname "$RESTIC_EXCLUDE_FILE")"
     {
         echo "# Restic Exclude List (files/dirs to NOT back up)"
@@ -112,7 +112,6 @@ initialize_repo() {
     echo -e "\nInitialization complete!"
 }
 
-# UPDATED FUNCTION with the correct, universally compatible `du` command
 check_disk_space_for_backup() {
     echo "Checking for available disk space..."
     local available_kb
@@ -124,7 +123,6 @@ check_disk_space_for_backup() {
 
     if [ "$total_snapshots" -eq 0 ]; then
         echo "This is the first backup. Calculating required space..."
-        # This is the corrected, universally compatible command
         local used_kb
         used_kb=$(du -skx --exclude='/var/cache' --exclude='/var/tmp' --exclude='/tmp' --exclude='/home/*/.cache' --exclude='/var/log' --exclude='/proc' --exclude='/sys' --exclude='/dev' --exclude='/run' --exclude='/mnt' --exclude='/media' --exclude='/snap' --exclude='/swap.img' --exclude="$BACKUP_DIR" --exclude="$RESTORE_TEMP_DIR_BASE" / /boot | awk '{s+=$1} END {print s}')
         local required_kb=$((used_kb * 110 / 100)) # 10% buffer
@@ -155,6 +153,7 @@ check_disk_space_for_backup() {
     return 0
 }
 
+# UPDATED FUNCTION with the correct, consistent exclude flags
 create_backup() {
     clear_screen
     echo "--- Create a New Server Snapshot ---"
@@ -175,9 +174,14 @@ create_backup() {
     echo "Starting backup of / and /boot..."
     echo "Restic will provide a summary when complete..."
     echo "--------------------------------------------------------------------------------"
+    # This is the corrected command with all exclude flags
     restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" backup \
         --tag "manual-snapshot" \
-        --exclude-file="$RESTIC_EXCLUDE_FILE" \
+        --exclude='/var/cache' --exclude='/var/tmp' --exclude='/tmp' \
+        --exclude='/home/*/.cache' --exclude='/var/log' --exclude='/proc' \
+        --exclude='/sys' --exclude='/dev' --exclude='/run' --exclude='/mnt' \
+        --exclude='/media' --exclude='/snap' --exclude='/swap.img' \
+        --exclude="$BACKUP_DIR" --exclude="$RESTORE_TEMP_DIR_BASE" \
         / /boot
     echo "--------------------------------------------------------------------------------"
     echo "Snapshot created successfully."
@@ -349,8 +353,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v6.5"
-    echo "      (The Definitive, Optimized Version)"
+    echo "  Universal Server Snapshot Manager v6.6"
+    echo "      (The Definitive, Corrected Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
