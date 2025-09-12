@@ -1,16 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v5.1 (Smarter Space Check)
+# Universal Server Snapshot Script v5.2 (The Definitive Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v5.1 Changelog:
-# - BUGFIX: The disk space check is now much smarter. It ignores virtual
-#   filesystems like Docker overlays and Snap mounts, preventing it from
-#   incorrectly double-counting used space. It will now report the
-#   correct required space on all systems.
+# v5.2 Changelog:
+# - FINAL/CRITICAL BUGFIX: Replaced the entire flawed 'df' disk space
+#   calculation with a much more robust and accurate method using 'du'.
+# - The 'du' command correctly ignores virtual filesystems and accurately
+#   measures the real size of files to be backed up, definitively fixing
+#   the "Required space" miscalculation.
 # ==============================================================================
 
 # --- Configuration ---
@@ -74,7 +75,7 @@ initialize_repo() {
         echo "/run"
         echo "/mnt"
         echo "/media"
-        echo "/snap" # Exclude the snap mount directory itself
+        echo "/snap"
     } > "$RESTIC_EXCLUDE_FILE"
 
     # Rsync exclude file (for RESTORE)
@@ -100,7 +101,7 @@ initialize_repo() {
     echo -e "\nInitialization complete!"
 }
 
-# UPDATED FUNCTION with smarter disk space calculation
+# UPDATED FUNCTION with the new `du` command
 check_disk_space_for_backup() {
     echo "Checking for available disk space..."
     local available_kb
@@ -111,9 +112,9 @@ check_disk_space_for_backup() {
 
     if [ "$total_snapshots" -eq 0 ]; then
         echo "This is the first backup. Calculating required space..."
-        # This command now excludes virtual filesystems for an accurate calculation
+        # THIS IS THE CORRECTED COMMAND. It uses `du` for an accurate measurement.
         local used_kb
-        used_kb=$(df -k --output=used -x squashfs -x tmpfs -x devtmpfs -x overlay / /boot | tail -n +2 | awk '{s+=$1} END {print s}')
+        used_kb=$(du -skx / /boot | awk '{s+=$1} END {print s}')
         local required_kb=$((used_kb * 11 / 10)) # Add 10% safety buffer
 
         if [ "$available_kb" -lt "$required_kb" ]; then
@@ -322,8 +323,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v5.1"
-    echo "     (Smarter Space Check Edition)"
+    echo "  Universal Server Snapshot Manager v5.2"
+    echo "        (The Definitive Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
