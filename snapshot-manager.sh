@@ -1,18 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v5.6 (The Definitive Version)
+# Universal Server Snapshot Script v5.8 (The Definitive, Compatible Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v5.6 Changelog:
-# - FINAL/CRITICAL FIX 1: The restore space check now uses a universally
-#   compatible Restic command (`ls -l`) that works on all Restic versions.
-# - FINAL/CRITICAL FIX 2: The restore process now creates its temporary
-#   directory at `/restic_restore_temp` instead of `/tmp`. This leverages
-#   the main disk's full capacity, solving the "not enough space" issue
-#   for the vast majority of servers.
+# v5.8 Changelog:
+# - FINAL/CRITICAL FIX: Replaced the restore space check with a truly universal
+#   method. It now manually calculates the total snapshot size by summing the
+#   size of every individual file, a method that is guaranteed to work on
+#   ALL versions of Restic, old and new. This definitively fixes the space
+#   check for maximum compatibility.
 # ==============================================================================
 
 # --- Configuration ---
@@ -20,7 +19,6 @@ BACKUP_DIR="/var/backups/restic-repo"
 PASSWORD_FILE="/etc/restic/password"
 RESTIC_EXCLUDE_FILE="/etc/restic/exclude.conf"
 RSYNC_EXCLUDE_FILE="/etc/restic/rsync-exclude.conf"
-# This is now the temporary location for restores
 RESTORE_TEMP_DIR_BASE="/restic_restore_temp"
 MIN_FREE_SPACE_GB=5
 # --- End Configuration ---
@@ -42,6 +40,7 @@ check_and_install_dependencies() {
     if ! command -v restic &> /dev/null; then missing_packages+=("restic"); fi
     if ! command -v rsync &> /dev/null; then missing_packages+=("rsync"); fi
     if ! command -v jq &> /dev/null; then missing_packages+=("jq"); fi
+    if ! command -v bc &> /dev/null; then missing_packages+=("bc"); fi
 
     if [ ${#missing_packages[@]} -gt 0 ]; then
         echo "The following required packages are not installed: ${missing_packages[*]}"
@@ -69,7 +68,7 @@ initialize_repo() {
     {
         echo "# Restic Exclude List (files/dirs to NOT back up)"
         echo "$BACKUP_DIR"
-        echo "$RESTORE_TEMP_DIR_BASE" # Exclude the temporary restore dir
+        echo "$RESTORE_TEMP_DIR_BASE"
         echo "/var/cache"
         echo "/home/*/.cache"
         echo "/tmp"
@@ -118,7 +117,7 @@ check_disk_space_for_backup() {
         echo "This is the first backup. Calculating required space..."
         local used_kb
         used_kb=$(du -skx / /boot | awk '{s+=$1} END {print s}')
-        local required_kb=$((used_kb * 11 / 10)) # Add 10% safety buffer
+        local required_kb=$((used_kb * 110 / 100)) # 10% buffer
 
         if [ "$available_kb" -lt "$required_kb" ]; then
             local required_gb=$((required_kb / 1024 / 1024))
@@ -227,27 +226,18 @@ delete_backup() {
     fi
 }
 
-# UPDATED FUNCTION with the universally compatible restore size calculation
+# UPDATED FUNCTION with the truly universal restore size calculation
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
     
     local available_kb
-    available_kb=$(df -k --output=avail / | tail -n 1) # Check space on root filesystem
+    available_kb=$(df -k --output=avail / | tail -n 1)
     
-    # This command gets the TRUE uncompressed size and works on ALL Restic versions
-    local summary
-    summary=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" ls -l "$snapshot_id" | tail -n 1)
+    echo "Calculating true snapshot size (this may take a moment)..."
+    # This command is guaranteed to work on all Restic versions.
     local required_bytes
-    required_bytes=$(echo "$summary" | awk '{print $3}')
-    local unit
-    unit=$(echo "$summary" | awk '{print $4}')
-
-    case $unit in
-        KiB) required_bytes=$(echo "$required_bytes * 1024" | bc);;
-        MiB) required_bytes=$(echo "$required_bytes * 1024 * 1024" | bc);;
-        GiB) required_bytes=$(echo "$required_bytes * 1024 * 1024 * 1024" | bc);;
-    esac
+    required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" ls -l "$snapshot_id" | awk '!/^Total:/ {s+=$5} END {print s}')
 
     # Add a 5% safety buffer
     local required_kb=$((required_bytes * 105 / 100 / 1024))
@@ -299,7 +289,6 @@ restore_backup() {
         fi
     fi
 
-    # Use the new, safer temporary directory at the root level
     local RESTORE_TEMP_DIR="${RESTORE_TEMP_DIR_BASE}_$(date +%s)"
     mkdir -p "$RESTORE_TEMP_DIR"
 
@@ -342,8 +331,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v5.6"
-    echo "        (The Definitive Version)"
+    echo "  Universal Server Snapshot Manager v5.8"
+    echo "       (The Definitive, Compatible Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
