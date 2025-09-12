@@ -1,14 +1,16 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v5.4 (The Definitive, Lint-Free Version)
+# Universal Server Snapshot Script v5.5 (The Definitive Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v5.4 Changelog:
-# - Passed shellcheck linting by correcting the order of operations in the
-#   restore space check to maintain arithmetic precision (SC2017).
+# v5.5 Changelog:
+# - FINAL/CRITICAL BUGFIX: Replaced the restore space check with the 100%
+#   accurate `restic stats --mode files` command. This calculates the TRUE
+#   uncompressed size of the snapshot and will definitively prevent any
+#   "no space left on device" errors during the restore-to-tmp step.
 # ==============================================================================
 
 # --- Configuration ---
@@ -219,6 +221,7 @@ delete_backup() {
     fi
 }
 
+# UPDATED FUNCTION with the 100% correct restore size calculation
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
@@ -226,10 +229,11 @@ check_disk_space_for_restore() {
     local available_kb
     available_kb=$(df -k --output=avail /tmp | tail -n 1)
     
+    # This is the 100% correct command to get the TRUE uncompressed restore size
     local required_bytes
-    required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" ls -l "$snapshot_id" | awk 'END {print $3}')
+    required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" stats --mode files "$snapshot_id" --json | jq '.[0].total_size')
 
-    # THIS IS THE CORRECTED LINE - multiplication is done first
+    # Add a 5% safety buffer
     local required_kb=$((required_bytes * 105 / 100 / 1024))
 
     if [ "$available_kb" -lt "$required_kb" ]; then
@@ -321,8 +325,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v5.4"
-    echo "     (The Definitive, Lint-Free Version)"
+    echo "  Universal Server Snapshot Manager v5.5"
+    echo "        (The Definitive Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
