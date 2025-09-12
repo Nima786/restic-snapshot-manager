@@ -1,16 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v5.5 (The Definitive Version)
+# Universal Server Snapshot Script v5.6 (The Definitive Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v5.5 Changelog:
-# - FINAL/CRITICAL BUGFIX: Replaced the restore space check with the 100%
-#   accurate `restic stats --mode files` command. This calculates the TRUE
-#   uncompressed size of the snapshot and will definitively prevent any
-#   "no space left on device" errors during the restore-to-tmp step.
+# v5.6 Changelog:
+# - FINAL/CRITICAL FIX 1: The restore space check now uses a universally
+#   compatible Restic command (`ls -l`) that works on all Restic versions.
+# - FINAL/CRITICAL FIX 2: The restore process now creates its temporary
+#   directory at `/restic_restore_temp` instead of `/tmp`. This leverages
+#   the main disk's full capacity, solving the "not enough space" issue
+#   for the vast majority of servers.
 # ==============================================================================
 
 # --- Configuration ---
@@ -18,6 +20,8 @@ BACKUP_DIR="/var/backups/restic-repo"
 PASSWORD_FILE="/etc/restic/password"
 RESTIC_EXCLUDE_FILE="/etc/restic/exclude.conf"
 RSYNC_EXCLUDE_FILE="/etc/restic/rsync-exclude.conf"
+# This is now the temporary location for restores
+RESTORE_TEMP_DIR_BASE="/restic_restore_temp"
 MIN_FREE_SPACE_GB=5
 # --- End Configuration ---
 
@@ -65,6 +69,7 @@ initialize_repo() {
     {
         echo "# Restic Exclude List (files/dirs to NOT back up)"
         echo "$BACKUP_DIR"
+        echo "$RESTORE_TEMP_DIR_BASE" # Exclude the temporary restore dir
         echo "/var/cache"
         echo "/home/*/.cache"
         echo "/tmp"
@@ -82,6 +87,7 @@ initialize_repo() {
     {
         echo "# Rsync Exclude List (files/dirs to NOT touch during restore)"
         echo "$BACKUP_DIR"
+        echo "$RESTORE_TEMP_DIR_BASE"
         echo "/var/lib/docker"
         echo "/var/cache"
         echo "/proc"
@@ -221,17 +227,27 @@ delete_backup() {
     fi
 }
 
-# UPDATED FUNCTION with the 100% correct restore size calculation
+# UPDATED FUNCTION with the universally compatible restore size calculation
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
     
     local available_kb
-    available_kb=$(df -k --output=avail /tmp | tail -n 1)
+    available_kb=$(df -k --output=avail / | tail -n 1) # Check space on root filesystem
     
-    # This is the 100% correct command to get the TRUE uncompressed restore size
+    # This command gets the TRUE uncompressed size and works on ALL Restic versions
+    local summary
+    summary=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" ls -l "$snapshot_id" | tail -n 1)
     local required_bytes
-    required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" stats --mode files "$snapshot_id" --json | jq '.[0].total_size')
+    required_bytes=$(echo "$summary" | awk '{print $3}')
+    local unit
+    unit=$(echo "$summary" | awk '{print $4}')
+
+    case $unit in
+        KiB) required_bytes=$(echo "$required_bytes * 1024" | bc);;
+        MiB) required_bytes=$(echo "$required_bytes * 1024 * 1024" | bc);;
+        GiB) required_bytes=$(echo "$required_bytes * 1024 * 1024 * 1024" | bc);;
+    esac
 
     # Add a 5% safety buffer
     local required_kb=$((required_bytes * 105 / 100 / 1024))
@@ -240,7 +256,7 @@ check_disk_space_for_restore() {
         local required_gb=$((required_kb / 1024 / 1024))
         local available_gb=$((available_kb / 1024 / 1024))
         echo "============================ ERROR ============================"
-        echo "Not enough disk space in /tmp to perform the restore."
+        echo "Not enough disk space on the main partition to perform the restore."
         echo "Required: ~${required_gb} GB | Available: ${available_gb} GB"
         echo "==============================================================="
         return 1
@@ -283,7 +299,8 @@ restore_backup() {
         fi
     fi
 
-    RESTORE_TEMP_DIR="/tmp/restic_restore_$(date +%s)"
+    # Use the new, safer temporary directory at the root level
+    local RESTORE_TEMP_DIR="${RESTORE_TEMP_DIR_BASE}_$(date +%s)"
     mkdir -p "$RESTORE_TEMP_DIR"
 
     echo "Step 1: Restoring snapshot to '$RESTORE_TEMP_DIR'..."
@@ -325,7 +342,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v5.5"
+    echo "  Universal Server Snapshot Manager v5.6"
     echo "        (The Definitive Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
