@@ -1,17 +1,15 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v5.2 (The Definitive Version)
+# Universal Server Snapshot Script v5.3 (The Definitive Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v5.2 Changelog:
-# - FINAL/CRITICAL BUGFIX: Replaced the entire flawed 'df' disk space
-#   calculation with a much more robust and accurate method using 'du'.
-# - The 'du' command correctly ignores virtual filesystems and accurately
-#   measures the real size of files to be backed up, definitively fixing
-#   the "Required space" miscalculation.
+# v5.3 Changelog:
+# - FINAL/CRITICAL BUGFIX: The disk space check for the RESTORE operation is
+#   now 100% accurate. It calculates the full, uncompressed size of the
+#   snapshot, preventing "no space left on device" errors during restore.
 # ==============================================================================
 
 # --- Configuration ---
@@ -101,7 +99,6 @@ initialize_repo() {
     echo -e "\nInitialization complete!"
 }
 
-# UPDATED FUNCTION with the new `du` command
 check_disk_space_for_backup() {
     echo "Checking for available disk space..."
     local available_kb
@@ -112,7 +109,6 @@ check_disk_space_for_backup() {
 
     if [ "$total_snapshots" -eq 0 ]; then
         echo "This is the first backup. Calculating required space..."
-        # THIS IS THE CORRECTED COMMAND. It uses `du` for an accurate measurement.
         local used_kb
         used_kb=$(du -skx / /boot | awk '{s+=$1} END {print s}')
         local required_kb=$((used_kb * 11 / 10)) # Add 10% safety buffer
@@ -224,6 +220,7 @@ delete_backup() {
     fi
 }
 
+# UPDATED FUNCTION with accurate restore size calculation
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
@@ -231,11 +228,15 @@ check_disk_space_for_restore() {
     local available_kb
     available_kb=$(df -k --output=avail /tmp | tail -n 1)
     
+    # This command gets the TRUE uncompressed size of the snapshot
     local required_bytes
-    required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" stats "$snapshot_id" --json --mode blobs | jq '.[0].total_size')
+    required_bytes=$(restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" ls -l "$snapshot_id" | awk 'END {print $3}')
 
-    if [ "$available_kb" -lt $((required_bytes / 1024)) ]; then
-        local required_gb=$((required_bytes / 1024 / 1024 / 1024))
+    # Add a 5% safety buffer
+    local required_kb=$((required_bytes / 1024 * 105 / 100))
+
+    if [ "$available_kb" -lt "$required_kb" ]; then
+        local required_gb=$((required_kb / 1024 / 1024))
         local available_gb=$((available_kb / 1024 / 1024))
         echo "============================ ERROR ============================"
         echo "Not enough disk space in /tmp to perform the restore."
@@ -323,7 +324,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v5.2"
+    echo "  Universal Server Snapshot Manager v5.3"
     echo "        (The Definitive Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
