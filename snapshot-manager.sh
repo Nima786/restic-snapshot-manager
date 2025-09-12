@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v6.3 (The Definitive, Transparent Version)
+# Universal Server Snapshot Manager v6.4 (The Definitive, Transparent Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v6.3 Changelog:
+# v6.4 Changelog:
 # - TRANSPARENCY: The disk space checks for both backup and restore now
 #   always display the "Required" vs "Available" space to the user.
 # - TRANSPARENCY: The script now explicitly frames the backup summary that
@@ -110,7 +110,6 @@ initialize_repo() {
     echo -e "\nInitialization complete!"
 }
 
-# UPDATED FUNCTION to be more transparent
 check_disk_space_for_backup() {
     echo "Checking for available disk space..."
     local available_kb
@@ -236,7 +235,6 @@ delete_backup() {
     fi
 }
 
-# UPDATED FUNCTION to be more transparent
 check_disk_space_for_restore() {
     local snapshot_id=$1
     echo "Checking for available disk space for restore..."
@@ -347,7 +345,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v6.3"
+    echo "  Universal Server Snapshot Manager v6.4"
     echo "    (The Definitive, Transparent Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
