@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v7.1 (The Definitive, Safe Version)
+# Universal Server Snapshot Script v7.3 (The Definitive, Targeted Restore)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v7.1 Changelog:
-# - FINAL/CRITICAL BUGFIX: The restore process has been completely rewritten
-#   with the 100% correct and safe rsync command.
-# - It now uses a precise list of --exclude flags to protect critical live
-#   directories while performing a true, destructive rollback of the rest of
-#   the filesystem. This is the industry-standard, safe method and
-#   definitively prevents the catastrophic deletion of /usr and other dirs.
+# v7.3 Changelog:
+# - FINAL/CRITICAL REFINEMENT: The restore process now uses a targeted sync
+#   method. It no longer performs a broad sync on the root filesystem.
+# - It now surgically syncs only the essential system directories, and it
+#   completely ignores directories that are not part of the backup, such as
+#   /var/log and /var/cache. This is the final, safest, and most logical
+#   restore method.
 # ==============================================================================
 
 # --- Configuration ---
@@ -223,7 +223,6 @@ check_disk_space_for_restore() {
     return 0
 }
 
-# UPDATED FUNCTION with the new, safe, and correct rsync command
 restore_backup() {
     if ! populate_and_display_snapshots; then return; fi
 
@@ -283,20 +282,30 @@ restore_backup() {
         echo "Warning: No Docker data found in backup, skipping swap."
     fi
 
-    echo "Step 3: Syncing all other system files..."
-    # This is the new, safe, and correct rsync command
-    rsync -aAXv --delete \
-        --exclude='/dev' \
-        --exclude='/proc' \
-        --exclude='/sys' \
-        --exclude='/run' \
-        --exclude='/tmp' \
-        --exclude='/mnt' \
-        --exclude='/media' \
-        --exclude='/lost+found' \
-        --exclude="$BACKUP_DIR" \
-        --exclude="$RESTORE_TEMP_DIR" \
-        "$RESTORE_TEMP_DIR/" /
+    echo "Step 3: Performing safe, targeted sync of system directories..."
+    # Directories that are safe to perform a full, destructive sync on
+    local -a sync_dirs_delete=("etc" "home" "root" "opt" "srv" "var/www" "var/spool" "usr/local")
+    for dir in "${sync_dirs_delete[@]}"; do
+        if [ -d "$RESTORE_TEMP_DIR/$dir" ]; then
+            echo "-> Syncing /$dir (with deletions)..."
+            rsync -aAXv --delete "$RESTORE_TEMP_DIR/$dir/" "/$dir/"
+        fi
+    done
+
+    # Critical binary directories that should only be added to, never deleted from
+    local -a sync_dirs_no_delete=("usr" "bin" "sbin" "lib" "lib64")
+    for dir in "${sync_dirs_no_delete[@]}"; do
+        if [ -d "$RESTORE_TEMP_DIR/$dir" ]; then
+            echo "-> Syncing /$dir (additions/updates only)..."
+            rsync -aAXv "$RESTORE_TEMP_DIR/$dir/" "/$dir/"
+        fi
+    done
+
+    # Special handling for /boot
+    if [ -d "$RESTORE_TEMP_DIR/boot" ]; then
+        echo "-> Syncing /boot..."
+        rsync -aAXv --delete --exclude='/efi' "$RESTORE_TEMP_DIR/boot/" "/boot/"
+    fi
 
     echo "Step 4: Cleaning up temporary files..."
     rm -rf "$RESTORE_TEMP_DIR"
@@ -317,8 +326,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v7.1"
-    echo "        (The Definitive, Safe Version)"
+    echo "  Universal Server Snapshot Manager v7.3"
+    echo "    (The Definitive, Targeted Restore)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
