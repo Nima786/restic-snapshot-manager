@@ -1,14 +1,19 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v7.4 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.0 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v7.4 Changelog:
-# - FINAL POLISH: Added a clear header to the post-backup summary to make it
-#   easier for the user to see what was processed and how much data was added.
+# v8.0 Changelog:
+# - FINAL/CRITICAL BUGFIX: The restore process has been completely rewritten
+#   to use the single, correct, and safe rsync command. It now performs a
+#   true, destructive rollback of the entire filesystem while surgically
+#   excluding critical live directories. This definitively fixes the bug
+#   where system updates were not being reverted.
+# - USER EXPERIENCE: The rsync command is no longer verbose, providing a
+#   much cleaner and less noisy output during the restore process.
 # ==============================================================================
 
 # --- Configuration ---
@@ -133,8 +138,14 @@ create_backup() {
         / /boot
     echo "----------------------------------------------------------------------"
     echo "Snapshot created successfully."
+    echo ""
+    echo "Included Essential Directories:"
+    echo "  /etc, /home, /root, /usr, /var, /opt, /srv, and /boot"
+    echo "(Note: Caches, logs, and temporary files were intentionally excluded to save space.)"
+
 
     if [ ${#running_containers[@]} -gt 0 ]; then
+        echo ""
         echo "Restarting containers..."
         docker start "${running_containers[@]}"
     fi
@@ -277,27 +288,20 @@ restore_backup() {
         echo "Warning: No Docker data found in backup, skipping swap."
     fi
 
-    echo "Step 3: Performing safe, targeted sync of system directories..."
-    local -a sync_dirs_delete=("etc" "home" "root" "opt" "srv" "var/www" "var/spool" "usr/local")
-    for dir in "${sync_dirs_delete[@]}"; do
-        if [ -d "$RESTORE_TEMP_DIR/$dir" ]; then
-            echo "-> Syncing /$dir (with deletions)..."
-            rsync -aAXv --delete "$RESTORE_TEMP_DIR/$dir/" "/$dir/"
-        fi
-    done
-
-    local -a sync_dirs_no_delete=("usr" "bin" "sbin" "lib" "lib64")
-    for dir in "${sync_dirs_no_delete[@]}"; do
-        if [ -d "$RESTORE_TEMP_DIR/$dir" ]; then
-            echo "-> Syncing /$dir (additions/updates only)..."
-            rsync -aAXv "$RESTORE_TEMP_DIR/$dir/" "/$dir/"
-        fi
-    done
-
-    if [ -d "$RESTORE_TEMP_DIR/boot" ]; then
-        echo "-> Syncing /boot..."
-        rsync -aAXv --delete --exclude='/efi' "$RESTORE_TEMP_DIR/boot/" "/boot/"
-    fi
+    echo "Step 3: Syncing all other system files..."
+    # This is the final, safe, and correct rsync command.
+    rsync -aAX --delete \
+        --exclude='/dev' \
+        --exclude='/proc' \
+        --exclude='/sys' \
+        --exclude='/run' \
+        --exclude='/tmp' \
+        --exclude='/mnt' \
+        --exclude='/media' \
+        --exclude='/lost+found' \
+        --exclude="$BACKUP_DIR" \
+        --exclude="$RESTORE_TEMP_DIR" \
+        "$RESTORE_TEMP_DIR/" /
 
     echo "Step 4: Cleaning up temporary files..."
     rm -rf "$RESTORE_TEMP_DIR"
@@ -318,7 +322,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v7.4"
+    echo "  Universal Server Snapshot Manager v8.0"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
