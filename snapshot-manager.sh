@@ -1,18 +1,19 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v8.3 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.4 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v8.3 Changelog:
-# - FINAL/CRITICAL BUGFIX: The script no longer attempts to restart individual
-#   Docker containers after a restore. This was fundamentally flawed as the
-#   container IDs change during the restore.
-# - The script now correctly restores the Docker data and service, and then
-#   instructs the user to perform the final, application-specific restart
-#   (e.g., 'docker-compose up -d'), which is the only 100% reliable method.
+# v8.4 Changelog:
+# - FINAL/CRITICAL FEATURE: The script is now "Application-Aware".
+# - During a restore, it intelligently inspects running Docker containers.
+# - It automatically restarts standalone containers by name.
+# - It automatically detects Docker Compose projects, finds their config
+#   files, and runs 'docker-compose up -d' to bring the entire
+#   application stack back online correctly. This provides a true,
+#   one-click restore for complex applications.
 # ==============================================================================
 
 # --- Configuration ---
@@ -40,6 +41,11 @@ check_and_install_dependencies() {
     if ! command -v rsync &> /dev/null; then missing_packages+=("rsync"); fi
     if ! command -v jq &> /dev/null; then missing_packages+=("jq"); fi
     if ! command -v bc &> /dev/null; then missing_packages+=("bc"); fi
+    # Check for docker-compose (both old and new versions)
+    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+        missing_packages+=("docker-compose-plugin");
+    fi
+
 
     if [ ${#missing_packages[@]} -gt 0 ]; then
         echo "The following required packages are not installed: ${missing_packages[*]}"
@@ -253,10 +259,33 @@ restore_backup() {
     read -r -p "To confirm, please type 'PROCEED': " confirmation
     if [ "$confirmation" != "PROCEED" ]; then echo "Restore aborted."; return; fi
 
+    # --- Pre-Restore Docker Inspection ---
+    local -a standalone_containers=()
+    declare -A compose_projects=() # Associative array for unique projects
     local docker_was_running=false
     if command -v docker &> /dev/null && systemctl is-active --quiet docker.service; then
         docker_was_running=true
-        echo "Docker detected. Stopping Docker service..."
+        echo "Docker detected. Inspecting running applications..."
+        local -a running_container_ids=()
+        mapfile -t running_container_ids < <(docker ps -q)
+
+        for id in "${running_container_ids[@]}"; do
+            local project_name
+            project_name=$(docker inspect "$id" | jq -r '.[0].Config.Labels["com.docker.compose.project"] // empty')
+            if [ -n "$project_name" ]; then
+                local work_dir
+                work_dir=$(docker inspect "$id" | jq -r '.[0].Config.Labels["com.docker.compose.project.working_dir"] // empty')
+                if [ -n "$work_dir" ]; then
+                    compose_projects["$project_name"]="$work_dir"
+                fi
+            else
+                local container_name
+                container_name=$(docker inspect "$id" | jq -r '.[0].Name | sub("^/"; "")')
+                standalone_containers+=("$container_name")
+            fi
+        done
+        
+        echo "Stopping Docker service..."
         systemctl stop docker.service docker.socket
     fi
 
@@ -287,16 +316,9 @@ restore_backup() {
 
     echo "Step 3: Syncing all other system files..."
     rsync -aAX --delete \
-        --exclude='/dev' \
-        --exclude='/proc' \
-        --exclude='/sys' \
-        --exclude='/run' \
-        --exclude='/tmp' \
-        --exclude='/mnt' \
-        --exclude='/media' \
-        --exclude='/lost+found' \
-        --exclude="$BACKUP_DIR" \
-        --exclude="$RESTORE_TEMP_DIR" \
+        --exclude='/dev' --exclude='/proc' --exclude='/sys' --exclude='/run' \
+        --exclude='/tmp' --exclude='/mnt' --exclude='/media' --exclude='/lost+found' \
+        --exclude="$BACKUP_DIR" --exclude="$RESTORE_TEMP_DIR" \
         "$RESTORE_TEMP_DIR/" /
 
     echo "Step 4: Cleaning up temporary files..."
@@ -305,10 +327,27 @@ restore_backup() {
     trap - INT TERM
 
     if [[ "$docker_was_running" == true ]]; then
-        echo "Step 5: Restarting Docker service..."
+        echo "Step 5: Restarting Docker service and applications..."
         systemctl start docker.service docker.socket
-        echo "Docker service restarted."
-        echo "IMPORTANT: You may need to manually restart your application (e.g., 'docker-compose up -d' or 'marzban restart')."
+        
+        if [ ${#standalone_containers[@]} -gt 0 ]; then
+            echo "-> Restarting standalone containers..."
+            docker start "${standalone_containers[@]}"
+        fi
+
+        if [ ${#compose_projects[@]} -gt 0 ]; then
+            echo "-> Restarting Docker Compose projects..."
+            local compose_cmd="docker-compose"
+            if docker compose version &> /dev/null; then
+                compose_cmd="docker compose"
+            fi
+            for project in "${!compose_projects[@]}"; do
+                local work_dir=${compose_projects[$project]}
+                echo "   - Project: '$project' in '$work_dir'"
+                (cd "$work_dir" && $compose_cmd up -d)
+            done
+        fi
+        echo "Application restart process complete."
     fi
 
     echo -e "\nRestore complete! A reboot is STRONGLY recommended."
@@ -319,7 +358,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v8.3"
+    echo "  Universal Server Snapshot Manager v8.4"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
