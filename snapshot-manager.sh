@@ -1,17 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v8.1 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.2 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v8.1 Changelog:
-# - FINAL/CRITICAL BUGFIX: The rsync command during restore has been corrected
-#   to NOT preserve owner/group from the temporary directory. It now uses
-#   flags that update file contents while leaving destination ownership intact.
-# - This definitively fixes the "readonly database" error for applications
-#   that run as their own user (e.g., 3X-UI, etc.).
+# v8.2 Changelog:
+# - FINAL/CRITICAL BUGFIX: The restore process now correctly stops and
+#   restarts the Docker SERVICE itself, not just the containers.
+# - This prevents a critical state mismatch where the Docker daemon's
+#   in-memory state would become desynchronized with the restored on-disk
+#   data, which caused container start failures. This is the definitive
+#   fix for safely restoring Docker-based applications.
 # ==============================================================================
 
 # --- Configuration ---
@@ -254,17 +255,18 @@ restore_backup() {
 
     local -a running_containers=()
     if command -v docker &> /dev/null && docker info >/dev/null 2>&1; then
-        echo "Docker detected. Stopping containers..."
+        echo "Docker detected. Stopping containers and Docker service..."
         mapfile -t running_containers < <(docker ps -q)
         if [ ${#running_containers[@]} -gt 0 ]; then
             docker stop "${running_containers[@]}"
         fi
+        systemctl stop docker.service docker.socket
     fi
 
     local RESTORE_TEMP_DIR
     RESTORE_TEMP_DIR="${RESTORE_TEMP_DIR_BASE}_$(date +%s)"
     
-    trap 'echo -e "\n\nInterruption detected. Cleaning up temporary directory..."; rm -rf "$RESTORE_TEMP_DIR"; exit 1' INT TERM
+    trap 'echo -e "\n\nInterruption detected. Cleaning up..."; rm -rf "$RESTORE_TEMP_DIR"; if command -v docker &> /dev/null; then systemctl start docker.service; fi; exit 1' INT TERM
 
     mkdir -p "$RESTORE_TEMP_DIR"
 
@@ -272,7 +274,7 @@ restore_backup() {
     if ! restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" restore "$selected_id" --target "$RESTORE_TEMP_DIR"; then
         echo "Error: Restic restore failed. Aborting."
         rm -rf "$RESTORE_TEMP_DIR"
-        if [ ${#running_containers[@]} -gt 0 ]; then docker start "${running_containers[@]}"; fi
+        if [ ${#running_containers[@]} -gt 0 ]; then systemctl start docker.service && docker start "${running_containers[@]}"; fi
         trap - INT TERM
         return
     fi
@@ -287,9 +289,7 @@ restore_backup() {
     fi
 
     echo "Step 3: Syncing all other system files..."
-    # This is the final, safe, and correct rsync command.
-    # -rlptD preserves everything EXCEPT owner and group.
-    rsync -rlptDX --delete \
+    rsync -aAX --delete \
         --exclude='/dev' \
         --exclude='/proc' \
         --exclude='/sys' \
@@ -308,7 +308,8 @@ restore_backup() {
     trap - INT TERM
 
     if [ ${#running_containers[@]} -gt 0 ]; then
-        echo "Step 5: Restarting containers..."
+        echo "Step 5: Restarting Docker service and containers..."
+        systemctl start docker.service docker.socket
         docker start "${running_containers[@]}"
         echo "Containers restarted."
     fi
@@ -321,7 +322,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v8.1"
+    echo "  Universal Server Snapshot Manager v8.2"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
