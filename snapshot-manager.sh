@@ -1,18 +1,14 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v7.3 (The Definitive, Targeted Restore)
+# Universal Server Snapshot Script v7.4 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v7.3 Changelog:
-# - FINAL/CRITICAL REFINEMENT: The restore process now uses a targeted sync
-#   method. It no longer performs a broad sync on the root filesystem.
-# - It now surgically syncs only the essential system directories, and it
-#   completely ignores directories that are not part of the backup, such as
-#   /var/log and /var/cache. This is the final, safest, and most logical
-#   restore method.
+# v7.4 Changelog:
+# - FINAL POLISH: Added a clear header to the post-backup summary to make it
+#   easier for the user to see what was processed and how much data was added.
 # ==============================================================================
 
 # --- Configuration ---
@@ -126,8 +122,7 @@ create_backup() {
     fi
 
     echo "Starting backup of / and /boot..."
-    echo "Restic will provide a summary when complete..."
-    echo "--------------------------------------------------------------------------------"
+    echo "--------------------------- BACKUP SUMMARY ---------------------------"
     restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" backup \
         --tag "manual-snapshot" \
         --exclude='/var/cache' --exclude='/var/tmp' --exclude='/tmp' \
@@ -136,7 +131,7 @@ create_backup() {
         --exclude='/media' --exclude='/snap' --exclude='/swap.img' \
         --exclude="$BACKUP_DIR" --exclude="$RESTORE_TEMP_DIR_BASE" \
         / /boot
-    echo "--------------------------------------------------------------------------------"
+    echo "----------------------------------------------------------------------"
     echo "Snapshot created successfully."
 
     if [ ${#running_containers[@]} -gt 0 ]; then
@@ -283,7 +278,6 @@ restore_backup() {
     fi
 
     echo "Step 3: Performing safe, targeted sync of system directories..."
-    # Directories that are safe to perform a full, destructive sync on
     local -a sync_dirs_delete=("etc" "home" "root" "opt" "srv" "var/www" "var/spool" "usr/local")
     for dir in "${sync_dirs_delete[@]}"; do
         if [ -d "$RESTORE_TEMP_DIR/$dir" ]; then
@@ -292,7 +286,6 @@ restore_backup() {
         fi
     done
 
-    # Critical binary directories that should only be added to, never deleted from
     local -a sync_dirs_no_delete=("usr" "bin" "sbin" "lib" "lib64")
     for dir in "${sync_dirs_no_delete[@]}"; do
         if [ -d "$RESTORE_TEMP_DIR/$dir" ]; then
@@ -301,7 +294,6 @@ restore_backup() {
         fi
     done
 
-    # Special handling for /boot
     if [ -d "$RESTORE_TEMP_DIR/boot" ]; then
         echo "-> Syncing /boot..."
         rsync -aAXv --delete --exclude='/efi' "$RESTORE_TEMP_DIR/boot/" "/boot/"
@@ -326,8 +318,8 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v7.3"
-    echo "    (The Definitive, Targeted Restore)"
+    echo "  Universal Server Snapshot Manager v7.4"
+    echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
     echo " 2) List All Snapshots"
