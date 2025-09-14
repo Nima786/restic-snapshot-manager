@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v8.2 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.3 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v8.2 Changelog:
-# - FINAL/CRITICAL BUGFIX: The restore process now correctly stops and
-#   restarts the Docker SERVICE itself, not just the containers.
-# - This prevents a critical state mismatch where the Docker daemon's
-#   in-memory state would become desynchronized with the restored on-disk
-#   data, which caused container start failures. This is the definitive
-#   fix for safely restoring Docker-based applications.
+# v8.3 Changelog:
+# - FINAL/CRITICAL BUGFIX: The script no longer attempts to restart individual
+#   Docker containers after a restore. This was fundamentally flawed as the
+#   container IDs change during the restore.
+# - The script now correctly restores the Docker data and service, and then
+#   instructs the user to perform the final, application-specific restart
+#   (e.g., 'docker-compose up -d'), which is the only 100% reliable method.
 # ==============================================================================
 
 # --- Configuration ---
@@ -253,20 +253,17 @@ restore_backup() {
     read -r -p "To confirm, please type 'PROCEED': " confirmation
     if [ "$confirmation" != "PROCEED" ]; then echo "Restore aborted."; return; fi
 
-    local -a running_containers=()
-    if command -v docker &> /dev/null && docker info >/dev/null 2>&1; then
-        echo "Docker detected. Stopping containers and Docker service..."
-        mapfile -t running_containers < <(docker ps -q)
-        if [ ${#running_containers[@]} -gt 0 ]; then
-            docker stop "${running_containers[@]}"
-        fi
+    local docker_was_running=false
+    if command -v docker &> /dev/null && systemctl is-active --quiet docker.service; then
+        docker_was_running=true
+        echo "Docker detected. Stopping Docker service..."
         systemctl stop docker.service docker.socket
     fi
 
     local RESTORE_TEMP_DIR
     RESTORE_TEMP_DIR="${RESTORE_TEMP_DIR_BASE}_$(date +%s)"
     
-    trap 'echo -e "\n\nInterruption detected. Cleaning up..."; rm -rf "$RESTORE_TEMP_DIR"; if command -v docker &> /dev/null; then systemctl start docker.service; fi; exit 1' INT TERM
+    trap 'echo -e "\n\nInterruption detected. Cleaning up..."; rm -rf "$RESTORE_TEMP_DIR"; if [[ "$docker_was_running" == true ]]; then systemctl start docker.service; fi; exit 1' INT TERM
 
     mkdir -p "$RESTORE_TEMP_DIR"
 
@@ -274,7 +271,7 @@ restore_backup() {
     if ! restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" restore "$selected_id" --target "$RESTORE_TEMP_DIR"; then
         echo "Error: Restic restore failed. Aborting."
         rm -rf "$RESTORE_TEMP_DIR"
-        if [ ${#running_containers[@]} -gt 0 ]; then systemctl start docker.service && docker start "${running_containers[@]}"; fi
+        if [[ "$docker_was_running" == true ]]; then systemctl start docker.service; fi
         trap - INT TERM
         return
     fi
@@ -307,11 +304,11 @@ restore_backup() {
 
     trap - INT TERM
 
-    if [ ${#running_containers[@]} -gt 0 ]; then
-        echo "Step 5: Restarting Docker service and containers..."
+    if [[ "$docker_was_running" == true ]]; then
+        echo "Step 5: Restarting Docker service..."
         systemctl start docker.service docker.socket
-        docker start "${running_containers[@]}"
-        echo "Containers restarted."
+        echo "Docker service restarted."
+        echo "IMPORTANT: You may need to manually restart your application (e.g., 'docker-compose up -d' or 'marzban restart')."
     fi
 
     echo -e "\nRestore complete! A reboot is STRONGLY recommended."
@@ -322,7 +319,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v8.2"
+    echo "  Universal Server Snapshot Manager v8.3"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
