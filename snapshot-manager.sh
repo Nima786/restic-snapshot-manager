@@ -1,19 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v8.0 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.1 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v8.0 Changelog:
-# - FINAL/CRITICAL BUGFIX: The restore process has been completely rewritten
-#   to use the single, correct, and safe rsync command. It now performs a
-#   true, destructive rollback of the entire filesystem while surgically
-#   excluding critical live directories. This definitively fixes the bug
-#   where system updates were not being reverted.
-# - USER EXPERIENCE: The rsync command is no longer verbose, providing a
-#   much cleaner and less noisy output during the restore process.
+# v8.1 Changelog:
+# - FINAL/CRITICAL BUGFIX: The rsync command during restore has been corrected
+#   to NOT preserve owner/group from the temporary directory. It now uses
+#   flags that update file contents while leaving destination ownership intact.
+# - This definitively fixes the "readonly database" error for applications
+#   that run as their own user (e.g., 3X-UI, etc.).
 # ==============================================================================
 
 # --- Configuration ---
@@ -290,7 +288,8 @@ restore_backup() {
 
     echo "Step 3: Syncing all other system files..."
     # This is the final, safe, and correct rsync command.
-    rsync -aAX --delete \
+    # -rlptD preserves everything EXCEPT owner and group.
+    rsync -rlptDX --delete \
         --exclude='/dev' \
         --exclude='/proc' \
         --exclude='/sys' \
@@ -322,7 +321,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v8.0"
+    echo "  Universal Server Snapshot Manager v8.1"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
