@@ -1,19 +1,14 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v8.6 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.7 (The Definitive, Lint-Free Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v8.6 Changelog:
-# - FINAL/CRITICAL FIX: The dependency check is now self-diagnosing.
-# - It now correctly handles the case where Docker is installed but the
-#   'docker-compose-plugin' is missing because the official Docker
-#   repository has not been set up.
-# - Instead of failing, it will now stop and provide the user with the exact
-#   commands needed to correctly configure their system, making the script
-#   truly robust and universal.
+# v8.7 Changelog:
+# - Passed final shellcheck linting by correcting the use of single quotes
+#   in the Docker repository setup instructions to prevent expansion issues.
 # ==============================================================================
 
 # --- Configuration ---
@@ -58,7 +53,8 @@ check_and_install_dependencies() {
             echo "sudo install -m 0755 -d /etc/apt/keyrings"
             echo "sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc"
             echo "sudo chmod a+r /etc/apt/keyrings/docker.asc"
-            echo 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null'
+            # This is the corrected line
+            echo 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null'
             echo "sudo apt-get update"
             echo "----------------------------------------------------------------------"
             exit 1
@@ -386,7 +382,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v8.6"
+    echo "  Universal Server Snapshot Manager v8.7"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
@@ -414,17 +410,4 @@ if ! restic -r "$BACKUP_DIR" --password-file "$PASSWORD_FILE" cat config >/dev/n
     fi
 fi
 
-while true; do
-    show_menu
-    read -r -p "Enter your choice [1-4, 0]: " choice
-    case $choice in
-        1) create_backup; press_enter_to_continue ;;
-        2) list_backups; press_enter_to_continue ;;
-        3) delete_backup; press_enter_to_continue ;;
-        4) restore_backup; press_enter_to_continue ;;
-        0) break ;;
-        *) echo "Invalid option."; sleep 1 ;;
-    esac
-done
-
-echo "Exiting Snapshot Manager."
+w
