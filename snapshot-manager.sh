@@ -1,19 +1,18 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v8.4 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.5 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v8.4 Changelog:
-# - FINAL/CRITICAL FEATURE: The script is now "Application-Aware".
-# - During a restore, it intelligently inspects running Docker containers.
-# - It automatically restarts standalone containers by name.
-# - It automatically detects Docker Compose projects, finds their config
-#   files, and runs 'docker-compose up -d' to bring the entire
-#   application stack back online correctly. This provides a true,
-#   one-click restore for complex applications.
+# v8.5 Changelog:
+# - FINAL/CRITICAL FEATURE: The script is now fully ARM-compatible.
+# - The dependency check now automatically enables the 'universe' repository
+#   if it's missing, which is a common issue on minimal ARM server images.
+# - This ensures that 'restic' and other packages can be found and installed
+#   on any standard Ubuntu architecture (amd64, arm64) without manual user
+#   intervention.
 # ==============================================================================
 
 # --- Configuration ---
@@ -41,18 +40,27 @@ check_and_install_dependencies() {
     if ! command -v rsync &> /dev/null; then missing_packages+=("rsync"); fi
     if ! command -v jq &> /dev/null; then missing_packages+=("jq"); fi
     if ! command -v bc &> /dev/null; then missing_packages+=("bc"); fi
-    # Check for docker-compose (both old and new versions)
     if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
         missing_packages+=("docker-compose-plugin");
     fi
-
 
     if [ ${#missing_packages[@]} -gt 0 ]; then
         echo "The following required packages are not installed: ${missing_packages[*]}"
         read -r -p "Do you want to install them now? (Y/n): " choice
         choice=${choice:-Y}
         if [[ "$choice" == "y" || "$choice" == "Y" ]]; then
-            apt-get update && apt-get install -y "${missing_packages[@]}"
+            echo "Updating package lists..."
+            apt-get update
+            
+            # Check if restic is available, if not, enable universe
+            if ! apt-cache show restic &> /dev/null; then
+                echo "'restic' not found in current repositories. Enabling 'universe'..."
+                add-apt-repository -y universe
+                apt-get update
+            fi
+
+            echo "Installing dependencies..."
+            apt-get install -y "${missing_packages[@]}"
         else
             echo "Installation aborted."; exit 1
         fi
@@ -261,7 +269,7 @@ restore_backup() {
 
     # --- Pre-Restore Docker Inspection ---
     local -a standalone_containers=()
-    declare -A compose_projects=() # Associative array for unique projects
+    declare -A compose_projects=()
     local docker_was_running=false
     if command -v docker &> /dev/null && systemctl is-active --quiet docker.service; then
         docker_was_running=true
@@ -358,7 +366,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v8.4"
+    echo "  Universal Server Snapshot Manager v8.5"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
