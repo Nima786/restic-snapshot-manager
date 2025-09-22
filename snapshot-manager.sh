@@ -1,18 +1,19 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v8.5 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.6 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v8.5 Changelog:
-# - FINAL/CRITICAL FEATURE: The script is now fully ARM-compatible.
-# - The dependency check now automatically enables the 'universe' repository
-#   if it's missing, which is a common issue on minimal ARM server images.
-# - This ensures that 'restic' and other packages can be found and installed
-#   on any standard Ubuntu architecture (amd64, arm64) without manual user
-#   intervention.
+# v8.6 Changelog:
+# - FINAL/CRITICAL FIX: The dependency check is now self-diagnosing.
+# - It now correctly handles the case where Docker is installed but the
+#   'docker-compose-plugin' is missing because the official Docker
+#   repository has not been set up.
+# - Instead of failing, it will now stop and provide the user with the exact
+#   commands needed to correctly configure their system, making the script
+#   truly robust and universal.
 # ==============================================================================
 
 # --- Configuration ---
@@ -40,8 +41,28 @@ check_and_install_dependencies() {
     if ! command -v rsync &> /dev/null; then missing_packages+=("rsync"); fi
     if ! command -v jq &> /dev/null; then missing_packages+=("jq"); fi
     if ! command -v bc &> /dev/null; then missing_packages+=("bc"); fi
-    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-        missing_packages+=("docker-compose-plugin");
+
+    # Special check for Docker Compose
+    if command -v docker &> /dev/null; then
+        if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+            echo "============================ FATAL ERROR ============================"
+            echo "Docker is installed, but its 'compose' plugin is missing."
+            echo "This script cannot automatically install it because it requires"
+            echo "setting up Docker's official software repository first."
+            echo ""
+            echo "Please run the following commands to set up the repository,"
+            echo "then run this snapshot script again:"
+            echo "----------------------------------------------------------------------"
+            echo "sudo apt-get update"
+            echo "sudo apt-get install ca-certificates curl"
+            echo "sudo install -m 0755 -d /etc/apt/keyrings"
+            echo "sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc"
+            echo "sudo chmod a+r /etc/apt/keyrings/docker.asc"
+            echo 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null'
+            echo "sudo apt-get update"
+            echo "----------------------------------------------------------------------"
+            exit 1
+        fi
     fi
 
     if [ ${#missing_packages[@]} -gt 0 ]; then
@@ -52,9 +73,8 @@ check_and_install_dependencies() {
             echo "Updating package lists..."
             apt-get update
             
-            # Check if restic is available, if not, enable universe
             if ! apt-cache show restic &> /dev/null; then
-                echo "'restic' not found in current repositories. Enabling 'universe'..."
+                echo "'restic' not found. Enabling 'universe' repository..."
                 add-apt-repository -y universe
                 apt-get update
             fi
@@ -366,7 +386,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v8.5"
+    echo "  Universal Server Snapshot Manager v8.6"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
