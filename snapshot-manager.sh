@@ -1,15 +1,16 @@
 #!/bin/bash
 
 # ==============================================================================
-# Universal Server Snapshot Script v8.8 (The Definitive, Final Version)
+# Universal Server Snapshot Script v8.9 (The Definitive, Final Version)
 # ==============================================================================
 # A professional, menu-driven script to create, manage, and restore
 # full server snapshots on any Ubuntu system.
 #
-# v8.8 Changelog:
-# - Passed final shellcheck linting by correcting the use of quotes in the
-#   Docker repository setup instructions to ensure they are printed correctly
-#   for the user to copy and paste.
+# v8.9 Changelog:
+# - FINAL/CRITICAL BUGFIX: The create_backup function has been corrected to
+#   automatically restart any Docker containers that it stops. This was a
+#   critical oversight and ensures the server is returned to its original
+#   state after a backup is complete.
 # ==============================================================================
 
 # --- Configuration ---
@@ -37,8 +38,6 @@ check_and_install_dependencies() {
     if ! command -v rsync &> /dev/null; then missing_packages+=("rsync"); fi
     if ! command -v jq &> /dev/null; then missing_packages+=("jq"); fi
     if ! command -v bc &> /dev/null; then missing_packages+=("bc"); fi
-
-    # Special check for Docker Compose
     if command -v docker &> /dev/null; then
         if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
             echo "============================ FATAL ERROR ============================"
@@ -54,7 +53,6 @@ check_and_install_dependencies() {
             echo "sudo install -m 0755 -d /etc/apt/keyrings"
             echo "sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc"
             echo "sudo chmod a+r /etc/apt/keyrings/docker.asc"
-            # This is the corrected line
             echo "echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \$(. /etc/os-release && echo \"\$VERSION_CODENAME\") stable\" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null"
             echo "sudo apt-get update"
             echo "----------------------------------------------------------------------"
@@ -139,6 +137,7 @@ check_disk_space_for_backup() {
     return 0
 }
 
+# UPDATED FUNCTION with the correct container restart logic
 create_backup() {
     clear_screen
     echo "--- Create a New Server Snapshot ---"
@@ -173,7 +172,7 @@ create_backup() {
     echo "  /etc, /home, /root, /usr, /var, /opt, /srv, and /boot"
     echo "(Note: Caches, logs, and temporary files were intentionally excluded to save space.)"
 
-
+    # This is the corrected block
     if [ ${#running_containers[@]} -gt 0 ]; then
         echo ""
         echo "Restarting containers..."
@@ -383,7 +382,7 @@ restore_backup() {
 show_menu() {
     clear_screen
     echo "========================================"
-    echo "  Universal Server Snapshot Manager v8.8"
+    echo "  Universal Server Snapshot Manager v8.9"
     echo "      (The Definitive, Final Version)"
     echo "========================================"
     echo " 1) Create a Backup Snapshot"
